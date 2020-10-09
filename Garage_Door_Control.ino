@@ -15,7 +15,7 @@ const char* password = "GlockHK23";
 
 
 /*
- * ID bits D4 and D5 are used to
+ * ID bits D6 and D5 are used to
  * identify which garage door 
  * the controller is associated with.
  * 
@@ -47,7 +47,7 @@ const char* password = "GlockHK23";
 
 
 const char* mqtt_user = "homeassistant";      // As defined in configuration.YAML
-const char* mqtt_pass = "GlockHK23";          // As defined in configuration.YAML
+const char* mqtt_pass = "zohchieRaengooNahth8xieng5iuYu0kahee8xaic4eisu0Hiek7iengai0nieXe";          // As defined in HASSIO integration setup
  
 //************END CUSTOM PARAMS********************//
 //This can be used to output the date the code was compiled
@@ -64,6 +64,9 @@ String          strTopic;
 int             configured_side = 99;
  
 void setup() {
+  
+  digitalWrite(RELAY_PIN, LOW);
+  delay(50);
   pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, LOW);
   
