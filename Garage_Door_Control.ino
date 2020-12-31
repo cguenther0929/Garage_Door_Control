@@ -5,7 +5,9 @@
 ////**********START CUSTOM PARAMS******************//
  
 // Host name and router info
-const char* host = "Garage1ESP";
+
+String host_string;      
+char host[16];      
 const char* ssid = "CJG_GbE_2G4";
 const char* password = "GlockHK23";
  
@@ -35,7 +37,7 @@ const char* password = "GlockHK23";
 #define SHOP_DOOR_WEST  2             // Bits D3 and D2 = 0b10
 #define SHOP_DOOR_EAST  3             // Bits D3 and D2 = 0b11
 
-#define PUSH_DWELL_US 900           // Dwell time, in us, for 'holding' down the button
+#define PUSH_DWELL_US   900           // Dwell time, in us, for 'holding' down the button
  
 //Define MQTT parameters 
 #define mqtt_server "192.168.0.249"                   // This is the host address of HASSIO (reserved address in router)
@@ -61,7 +63,8 @@ PubSubClient client(espCgarage1);
 //Setup Variables
 String          switch1;
 String          strTopic;
-int             configured_side = 99;
+int             configured_side_int = 99;
+String          configured_side_str;
  
 void setup() {
   
@@ -80,9 +83,28 @@ void setup() {
   Serial.begin(115200);
   Serial.println("Reset");
 
-  configured_side = (int)(digitalRead(D6) << 1 | digitalRead(D5));
+  // configured_side_int = (int)(digitalRead(D6) << 1 | digitalRead(D5));   //TODO this is the line we want in!
+  configured_side_int = MEG_SIDE;      //TAKE this out after testing    //TODO we need to remove this line!
   
-  switch (configured_side) {
+  /**
+   * Determine the host name
+   * based on the "configured side" 
+   * configuration bits.  The String()
+   * function doesn't produce a Std C-style
+   * string, thus the reason for calling 
+   * method .c_str(), which returns a const char 
+   * pointer that the strcpy() function gladly accepts
+   * If simply passing in the host_string, without 
+   * calling the method, the compiler will produce
+   * an error that reads something like "cannot convert
+   * String to Const Char *" 
+   * 
+   */
+  host_string = (String("GarageCtrl" + String(configured_side_int)));
+  Serial.print("Host name: "); Serial.println(host_string);
+  strcpy(host, host_string.c_str());
+  
+  switch (configured_side_int) {
     case CJG_SIDE:
       Serial.println("ID configired as Clinton's side.");
     break;
@@ -104,12 +126,13 @@ void setup() {
 
   client.setServer(mqtt_server, 1883);  //1883 is the port number you have forwared for mqtt messages.
   client.setCallback(callback);         //callback is the function that gets called for a topic sub
+  
 }
 
 
 void loop() {
   //If MQTT client can't connect to broker, then reconnect
-  while (!client.connected()) {
+  if (!client.connected()) {
     digitalWrite(LED_PIN, LOW);            
     Serial.println("Reconnecting...");
     setup_wifi();                         // The router could have kicked us off...
@@ -125,7 +148,7 @@ void loop() {
 void callback(char* topic, byte* payload, unsigned int length) {
   payload[length] = '\0';
   strTopic = String((char*)topic);
-  if (strTopic == BUTTON_TOPIC_CJG && configured_side == CJG_SIDE)
+  if (strTopic == BUTTON_TOPIC_CJG && configured_side_int == CJG_SIDE)
   {
     switch1 = String((char*)payload);
     Serial.print("Topic: "); Serial.println(strTopic);
@@ -141,7 +164,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     }
   }
 
-  else if (strTopic == BUTTON_TOPIC_MEG && configured_side == MEG_SIDE)
+  else if (strTopic == BUTTON_TOPIC_MEG && configured_side_int == MEG_SIDE)
   {
     switch1 = String((char*)payload);
     Serial.print("Topic: "); Serial.println(strTopic);
@@ -150,14 +173,17 @@ void callback(char* topic, byte* payload, unsigned int length) {
     {
       // 'Push' the garage door open/close button
       Serial.println("RELAY ACTIVE");
-      digitalWrite(RELAY_PIN, HIGH);
-      delay(PUSH_DWELL_US);
-      digitalWrite(RELAY_PIN, LOW);
+      // digitalWrite(RELAY_PIN, HIGH);   //TODO this was the original line
+      analogWrite(RELAY_PIN,800);   //TODO this is just for testing
+      // delay(PUSH_DWELL_US);
+      delay(9000);
+      // digitalWrite(RELAY_PIN, LOW);   //TODO this was the original line
+      analogWrite(RELAY_PIN, 0);
       Serial.println("RELAY INACTIVE");
     }
   }
   
-  else if (strTopic == BUTTON_TOPIC_SHOP_WEST && configured_side == SHOP_DOOR_WEST)
+  else if (strTopic == BUTTON_TOPIC_SHOP_WEST && configured_side_int == SHOP_DOOR_WEST)
   {
     switch1 = String((char*)payload);
     Serial.print("Topic: ");    Serial.println(strTopic);
@@ -172,7 +198,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     }
   }
   
-  else if (strTopic == BUTTON_TOPIC_SHOP_EAST && configured_side == SHOP_DOOR_EAST)
+  else if (strTopic == BUTTON_TOPIC_SHOP_EAST && configured_side_int == SHOP_DOOR_EAST)
   {
     switch1 = String((char*)payload);
     Serial.print("Topic: ");    Serial.println(strTopic);
