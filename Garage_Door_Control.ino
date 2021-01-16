@@ -7,11 +7,25 @@
 // Host name and router info
 
 String host_string;      
-char host[16];      
+char host[16];    
+
+/**
+ * Based on the config ID (jumper settings), assign
+ * the button topic this module should respond to
+ */
+char assigned_button_topic[64];  // Based on the config ID, define the   
+
+/**
+ * WiFi parameters
+ */
+
 const char* ssid = "CJG_GbE_2G4";
 const char* password = "GlockHK23";
  
-//Define the pins
+/** 
+ * Define pins for driving the 
+ * LED and activating the relay
+*/
 #define RELAY_PIN       D0            // Digital pin that connects to the coil of the relay on the shield
 #define LED_PIN         D1            // Drive panel LED for health indication
 
@@ -32,21 +46,20 @@ const char* password = "GlockHK23";
  *
  */
 
-#define CJG_SIDE        0             // Bits D3 and D2 = 0b00
-#define MEG_SIDE        1             // Bits D3 and D2 = 0b01
-#define SHOP_DOOR_WEST  2             // Bits D3 and D2 = 0b10
-#define SHOP_DOOR_EAST  3             // Bits D3 and D2 = 0b11
+#define CJG_SIDE        0             // Bits D6 and D5 = 0b00
+#define MEG_SIDE        1             // Bits D6 and D5 = 0b01
+#define SHOP_DOOR_WEST  2             // Bits D6 and D5 = 0b10
+#define SHOP_DOOR_EAST  3             // Bits D6 and D5 = 0b11
 
 #define PUSH_DWELL_US   900           // Dwell time, in us, for 'holding' down the button
  
 //Define MQTT parameters 
 #define mqtt_server "192.168.0.249"                   // This is the host address of HASSIO (reserved address in router)
 
-#define BUTTON_TOPIC_CJG        "sensor/garage/cjg_action"   
-#define BUTTON_TOPIC_MEG        "sensor/garage/meg_action"           
-#define BUTTON_TOPIC_SHOP_WEST  "sensor/garage/shop_west_action"           
-#define BUTTON_TOPIC_SHOP_EAST  "sensor/garage/shop_east_action"           
-
+const char* BUTTON_TOPIC_CJG        = "sensor/garage/cjg_action";   
+const char* BUTTON_TOPIC_MEG        = "sensor/garage/meg_action";           
+const char* BUTTON_TOPIC_SHOP_WEST  = "sensor/garage/shop_west_action";
+const char* BUTTON_TOPIC_SHOP_EAST  = "sensor/garage/shop_east_action";           
 
 const char* mqtt_user = "homeassistant";      // As defined in configuration.YAML
 const char* mqtt_pass = "zohchieRaengooNahth8xieng5iuYu0kahee8xaic4eisu0Hiek7iengai0nieXe";          // As defined in HASSIO integration setup
@@ -68,23 +81,28 @@ String          configured_side_str;
  
 void setup() {
   
-  digitalWrite(RELAY_PIN, LOW);
-  delay(50);
-  pinMode(RELAY_PIN, OUTPUT);
-  digitalWrite(RELAY_PIN, LOW);
+  /**
+   * Relay PWM shall be off
+   */
+  analogWrite(RELAY_PIN, 0);
   
+  /**
+   * Initialize LED pin
+   * LED is ON when connected
+   * to MQTT broker
+   */
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
   
   /* Define ID pins as inputs */
   pinMode(D5, INPUT);
   pinMode(D6, INPUT);
- 
+  
   Serial.begin(115200);
+  delay(5000);    // Give the user some time to open the serial monitor
   Serial.println("Reset");
 
-  // configured_side_int = (int)(digitalRead(D6) << 1 | digitalRead(D5));   //TODO this is the line we want in!
-  configured_side_int = MEG_SIDE;      //TAKE this out after testing    //TODO we need to remove this line!
+  configured_side_int = (int)(digitalRead(D6) << 1 | digitalRead(D5));   
   
   /**
    * Determine the host name
@@ -106,17 +124,29 @@ void setup() {
   
   switch (configured_side_int) {
     case CJG_SIDE:
+      strcpy(assigned_button_topic, BUTTON_TOPIC_CJG);
       Serial.println("ID configired as Clinton's side.");
+      Serial.print("Assigned button topic: ");  Serial.println(assigned_button_topic);
     break;
+    
     case MEG_SIDE:
+      strcpy(assigned_button_topic, BUTTON_TOPIC_MEG);
       Serial.println("ID configired as Meghan's side.");
+      Serial.print("Assigned button topic: ");  Serial.println(assigned_button_topic);
     break;
+    
     case SHOP_DOOR_WEST:
+      strcpy(assigned_button_topic,BUTTON_TOPIC_SHOP_WEST);
       Serial.println("ID configired as shop door West.");
+      Serial.print("Assigned button topic: ");  Serial.println(assigned_button_topic);
     break;
+    
     case SHOP_DOOR_EAST:
+      strcpy(assigned_button_topic,BUTTON_TOPIC_SHOP_EAST);
       Serial.println("ID configired as shop door East.");
+      Serial.print("Assigned button topic: ");  Serial.println(assigned_button_topic);
     break;
+    
     default:
       Serial.println("ID improperly configured.");
     break;
@@ -148,7 +178,8 @@ void loop() {
 void callback(char* topic, byte* payload, unsigned int length) {
   payload[length] = '\0';
   strTopic = String((char*)topic);
-  if (strTopic == BUTTON_TOPIC_CJG && configured_side_int == CJG_SIDE)
+  
+  if (strTopic == assigned_button_topic)
   {
     switch1 = String((char*)payload);
     Serial.print("Topic: "); Serial.println(strTopic);
@@ -157,62 +188,12 @@ void callback(char* topic, byte* payload, unsigned int length) {
     {
       // 'Push' the garage door open/close button
       Serial.println("RELAY ACTIVE");
-      digitalWrite(RELAY_PIN, HIGH);
+      analogWrite(RELAY_PIN,512);       // Duty cycle val 0-1023 (512~50%)  
       delay(PUSH_DWELL_US);
-      digitalWrite(RELAY_PIN, LOW);
-      Serial.println("RELAY INACTIVE");
-    }
-  }
-
-  else if (strTopic == BUTTON_TOPIC_MEG && configured_side_int == MEG_SIDE)
-  {
-    switch1 = String((char*)payload);
-    Serial.print("Topic: "); Serial.println(strTopic);
-    Serial.print("Payload: ");Serial.println(switch1);
-    if (switch1 == "PUSH_BUTTON")
-    {
-      // 'Push' the garage door open/close button
-      Serial.println("RELAY ACTIVE");
-      // digitalWrite(RELAY_PIN, HIGH);   //TODO this was the original line
-      analogWrite(RELAY_PIN,800);   //TODO this is just for testing
-      // delay(PUSH_DWELL_US);
-      delay(9000);
-      // digitalWrite(RELAY_PIN, LOW);   //TODO this was the original line
       analogWrite(RELAY_PIN, 0);
       Serial.println("RELAY INACTIVE");
     }
   }
-  
-  else if (strTopic == BUTTON_TOPIC_SHOP_WEST && configured_side_int == SHOP_DOOR_WEST)
-  {
-    switch1 = String((char*)payload);
-    Serial.print("Topic: ");    Serial.println(strTopic);
-    Serial.print("Payload: ");  Serial.println(switch1);
-    if (switch1 == "PUSH_BUTTON") {
-      // 'Push' the garage door open/close button
-      Serial.println("RELAY ACTIVE");
-      digitalWrite(RELAY_PIN, HIGH);
-      delay(PUSH_DWELL_US);
-      digitalWrite(RELAY_PIN, LOW);
-      Serial.println("RELAY INACTIVE");
-    }
-  }
-  
-  else if (strTopic == BUTTON_TOPIC_SHOP_EAST && configured_side_int == SHOP_DOOR_EAST)
-  {
-    switch1 = String((char*)payload);
-    Serial.print("Topic: ");    Serial.println(strTopic);
-    Serial.print("Payload: ");  Serial.println(switch1);
-    if (switch1 == "PUSH_BUTTON") {
-      // 'Push' the garage door open/close button
-      Serial.println("RELAY ACTIVE");
-      digitalWrite(RELAY_PIN, HIGH);
-      delay(PUSH_DWELL_US);
-      digitalWrite(RELAY_PIN, LOW);
-      Serial.println("RELAY INACTIVE");
-    }
-  }
-  
 }
 
 void setup_wifi() {
