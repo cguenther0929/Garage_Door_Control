@@ -2,8 +2,12 @@
 #include <ESP8266WiFi.h>          //ESP8266 Core WiFi Library
 #include <PubSubClient.h>         //MQTT
  
+/**************************************************/
 ////**********START CUSTOM PARAMS******************//
- 
+/**************************************************/
+//TODO develop a state message for the purpose of sending out a beacon 
+#define SW_VERSION    "3.0.0"
+
 // Host name and router info
 
 String host_string;      
@@ -38,36 +42,36 @@ const char* password = "GlockHK23";
  *   Bits  +
  *   D6 D5 | Garage Door
  * +-------------------------------+
- *    0  0 | Clinton's Side
- *    0  1 | Meghan's Side
+ *    0  0 | House Single Door 
+ *    0  1 | House Double Door
  *    1  0 | Shop Door West
  *    1  1 | Shop Door East
  *         +
  *
  */
 
-#define CJG_SIDE        0             // Bits D6 and D5 = 0b00
-#define MEG_SIDE        1             // Bits D6 and D5 = 0b01
+#define SGL_SIDE        0             // Bits D6 and D5 = 0b00
+#define DBL_SIDE        1             // Bits D6 and D5 = 0b01
 #define SHOP_DOOR_WEST  2             // Bits D6 and D5 = 0b10
 #define SHOP_DOOR_EAST  3             // Bits D6 and D5 = 0b11
 
-#define PUSH_DWELL_US   900           // Dwell time, in us, for 'holding' down the button
+#define PUSH_DWELL_US   1200          // Dwell time, in us, for 'holding' down the button
  
 //Define MQTT parameters 
-#define mqtt_server "192.168.0.249"                   // This is the host address of HASSIO (reserved address in router)
+#define mqtt_server "192.168.0.249"   // This is the host address of HASSIO (reserved address in router)
 
-const char* BUTTON_TOPIC_CJG        = "sensor/garage/cjg_action";   
-const char* BUTTON_TOPIC_MEG        = "sensor/garage/meg_action";           
+const char* BUTTON_TOPIC_SGL        = "sensor/garage/sgl_action";   
+const char* BUTTON_TOPIC_DBL        = "sensor/garage/dbl_action";           
 const char* BUTTON_TOPIC_SHOP_WEST  = "sensor/garage/shop_west_action";
 const char* BUTTON_TOPIC_SHOP_EAST  = "sensor/garage/shop_east_action";           
 
-const char* mqtt_user = "homeassistant";      // As defined in configuration.YAML
-const char* mqtt_pass = "zohchieRaengooNahth8xieng5iuYu0kahee8xaic4eisu0Hiek7iengai0nieXe";          // As defined in HASSIO integration setup
- 
+const char* mqtt_user = "cjg_mqtt";      // As defined in configuration.YAML
+const char* mqtt_pass = "MQTTRockRiverHK23";          // As defined in HASSIO integration setup
+
+/**************************************************/
 //************END CUSTOM PARAMS********************//
-//This can be used to output the date the code was compiled
-// const char compile_date[] = __DATE__ " " __TIME__;
- 
+/**************************************************/
+
 WiFiClient espCgarage1;
  
 //Initialize MQTT
@@ -123,14 +127,14 @@ void setup() {
   strcpy(host, host_string.c_str());
   
   switch (configured_side_int) {
-    case CJG_SIDE:
-      strcpy(assigned_button_topic, BUTTON_TOPIC_CJG);
+    case SGL_SIDE:
+      strcpy(assigned_button_topic, BUTTON_TOPIC_SGL);
       Serial.println("ID configired as Clinton's side.");
       Serial.print("Assigned button topic: ");  Serial.println(assigned_button_topic);
     break;
     
-    case MEG_SIDE:
-      strcpy(assigned_button_topic, BUTTON_TOPIC_MEG);
+    case DBL_SIDE:
+      strcpy(assigned_button_topic, BUTTON_TOPIC_DBL);
       Serial.println("ID configired as Meghan's side.");
       Serial.print("Assigned button topic: ");  Serial.println(assigned_button_topic);
     break;
@@ -152,6 +156,10 @@ void setup() {
     break;
   }
   
+  Serial.print("The SW version: ");
+  Serial.print(SW_VERSION);
+  Serial.println();
+
   setup_wifi();
 
   client.setServer(mqtt_server, 1883);  //1883 is the port number you have forwared for mqtt messages.
