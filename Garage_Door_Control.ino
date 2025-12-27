@@ -2,14 +2,40 @@
 #include <ESP8266WiFi.h>          //ESP8266 Core WiFi Library
 #include <PubSubClient.h>         //MQTT
  
+
+
+/**
+ * Timer parameters
+ */
+long        tmr1_write_val      = 3030;   // Empirically derived to generate a 1ms tick timer (copied from the firework igniter).
+
+uint16_t    ms_ticks_1          = 0;
+uint16_t    ms_ticks_50         = 0;
+uint16_t    ms_ticks_500        = 0;
+uint16_t    ms_ticks_1000       = 0;
+uint16_t    seconds_counter     = 0;        //32bit value 4.264....e9
+
+
+bool        Timer1msFlag        = false;
+bool        Timer50msFlag       = false;
+bool        Timer500msFlag      = false;
+bool        Timer1000msFlag     = false;
+bool        timer_running       = false;
+
 /**************************************************/
 ////**********START CUSTOM PARAMS******************//
 /**************************************************/
-//TODO develop a state message for the purpose of sending out a beacon 
-#define SW_VERSION    "3.0.0"
+
+/**************************/
+/**************************/
+#define SW_VERSION    "3.1.0"
+/**************************/
+/**************************/
+
+/** Define how often the state message should be sent */
+#define     SECONDS_BETWEEN_STATE_MESSAGES  30
 
 // Host name and router info
-
 String host_string;      
 char host[16];    
 
@@ -17,13 +43,16 @@ char host[16];
  * Based on the config ID (jumper settings), assign
  * the button topic this module should respond to
  */
-char assigned_button_topic[64];  // Based on the config ID, define the   
+char assigned_ctrl_topic[64]; // Based on the config ID, define the topic message   
+char assigned_ctrl_state[64]; // Based on the config ID, define the topic message   
+char state_payload[64];       // This defines the payload to send out against the state message 
+
 
 /**
  * WiFi parameters
  */
 
-const char* ssid = "CJG_GbE_2G4";
+const char* ssid = "CJG_WIFI6";
 const char* password = "GlockHK23";
  
 /** 
@@ -55,15 +84,22 @@ const char* password = "GlockHK23";
 #define SHOP_DOOR_WEST  2             // Bits D6 and D5 = 0b10
 #define SHOP_DOOR_EAST  3             // Bits D6 and D5 = 0b11
 
-#define PUSH_DWELL_US   1200          // Dwell time, in us, for 'holding' down the button
+#define PUSH_DWELL_US   1000          // Dwell time, in us, for 'holding' down the button
  
 //Define MQTT parameters 
 #define mqtt_server "192.168.0.249"   // This is the host address of HASSIO (reserved address in router)
 
-const char* BUTTON_TOPIC_SGL        = "sensor/garage/sgl_action";   
-const char* BUTTON_TOPIC_DBL        = "sensor/garage/dbl_action";           
-const char* BUTTON_TOPIC_SHOP_WEST  = "sensor/garage/shop_west_action";
-const char* BUTTON_TOPIC_SHOP_EAST  = "sensor/garage/shop_east_action";           
+const char* CTRL_TOPIC_SGL        = "sensor/garage/sgl_action";   
+const char* CTRL_STATE_SGL        = "sensor/garage/sgl_state";   
+
+const char* CTRL_TOPIC_DBL        = "sensor/garage/dbl_action";           
+const char* CTRL_STATE_DBL        = "sensor/garage/dbl_state";           
+
+const char* CTRL_TOPIC_SHOP_WEST  = "sensor/garage/shop_west_action";
+const char* CTRL_STATE_SHOP_WEST  = "sensor/garage/shop_west_state";
+
+const char* CTRL_TOPIC_SHOP_EAST  = "sensor/garage/shop_east_action";           
+const char* CTRL_STATE_SHOP_EAST  = "sensor/garage/shop_east_state";           
 
 const char* mqtt_user = "cjg_mqtt";      // As defined in configuration.YAML
 const char* mqtt_pass = "MQTTRockRiverHK23";          // As defined in HASSIO integration setup
@@ -82,12 +118,45 @@ String          switch1;
 String          strTopic;
 int             configured_side_int = 99;
 String          configured_side_str;
+
+void ICACHE_RAM_ATTR onTimerISR()
+{
+  timer1_write(tmr1_write_val);
+
+  Timer1msFlag = true;
+
+  if(ms_ticks_1 == 50) {
+    ms_ticks_1 = 0;
+    Timer50msFlag = true;
+    if(ms_ticks_50 == 10) {
+      ms_ticks_50 = 0;               //Reset centi-seconds
+      Timer500msFlag = true;
+    
+      if(ms_ticks_500 == 2) {         //See if we need to roll over
+        ms_ticks_500 = 0;
+        Timer1000msFlag = true;  
+      }
+      else {
+        ms_ticks_500 ++;              //Increase 500ms timer
+      }
+
+    }
+    else {
+        ms_ticks_50 ++;
+    }
+    
+  }
+  else {
+    ms_ticks_1 ++;
+  }
+}
  
 void setup() {
   
   /**
    * Relay PWM shall be off
    */
+  pinMode(RELAY_PIN, OUTPUT);
   analogWrite(RELAY_PIN, 0);
   
   /**
@@ -107,6 +176,10 @@ void setup() {
   Serial.println("Reset");
 
   configured_side_int = (int)(digitalRead(D6) << 1 | digitalRead(D5));   
+
+  /** Assemble the state payload */
+  strcpy(state_payload, "Module Alive. SW Version: ");
+  strcat(state_payload, SW_VERSION);
   
   /**
    * Determine the host name
@@ -128,31 +201,35 @@ void setup() {
   
   switch (configured_side_int) {
     case SGL_SIDE:
-      strcpy(assigned_button_topic, BUTTON_TOPIC_SGL);
-      Serial.println("ID configired as Clinton's side.");
-      Serial.print("Assigned button topic: ");  Serial.println(assigned_button_topic);
-    break;
-    
-    case DBL_SIDE:
-      strcpy(assigned_button_topic, BUTTON_TOPIC_DBL);
-      Serial.println("ID configired as Meghan's side.");
-      Serial.print("Assigned button topic: ");  Serial.println(assigned_button_topic);
-    break;
-    
-    case SHOP_DOOR_WEST:
-      strcpy(assigned_button_topic,BUTTON_TOPIC_SHOP_WEST);
-      Serial.println("ID configired as shop door West.");
-      Serial.print("Assigned button topic: ");  Serial.println(assigned_button_topic);
-    break;
-    
-    case SHOP_DOOR_EAST:
-      strcpy(assigned_button_topic,BUTTON_TOPIC_SHOP_EAST);
-      Serial.println("ID configired as shop door East.");
-      Serial.print("Assigned button topic: ");  Serial.println(assigned_button_topic);
+      strcpy(assigned_ctrl_topic, CTRL_TOPIC_SGL);
+      strcpy(assigned_ctrl_state, CTRL_STATE_SGL);
+      Serial.print("Assigned action topic: ");  Serial.println(assigned_ctrl_topic);
+      Serial.print("Assigned state topic: ");  Serial.println(assigned_ctrl_state);
+      break;
+      
+      case DBL_SIDE:
+      strcpy(assigned_ctrl_topic, CTRL_TOPIC_DBL);
+      strcpy(assigned_ctrl_state, CTRL_STATE_DBL);
+      Serial.print("Assigned action topic: ");  Serial.println(assigned_ctrl_topic);
+      Serial.print("Assigned state topic: ");  Serial.println(assigned_ctrl_state);
+      break;
+      
+      case SHOP_DOOR_WEST:
+      strcpy(assigned_ctrl_topic,CTRL_TOPIC_SHOP_WEST);
+      strcpy(assigned_ctrl_state,CTRL_STATE_SHOP_WEST);
+      Serial.print("Assigned action topic: ");  Serial.println(assigned_ctrl_topic);
+      Serial.print("Assigned state topic: ");  Serial.println(assigned_ctrl_state);
+      break;
+      
+      case SHOP_DOOR_EAST:
+      strcpy(assigned_ctrl_topic,CTRL_TOPIC_SHOP_EAST);
+      strcpy(assigned_ctrl_state,CTRL_STATE_SHOP_EAST);
+      Serial.print("Assigned action topic: ");  Serial.println(assigned_ctrl_topic);
+      Serial.print("Assigned state topic: ");  Serial.println(assigned_ctrl_state);
     break;
     
     default:
-      Serial.println("ID improperly configured.");
+      Serial.println("Unknown ID.");
     break;
   }
   
@@ -162,13 +239,21 @@ void setup() {
 
   setup_wifi();
 
-  client.setServer(mqtt_server, 1883);  //1883 is the port number you have forwared for mqtt messages.
+  client.setServer(mqtt_server, 1883);  //1883 is the port number you have forwarded for mqtt messages.
   client.setCallback(callback);         //callback is the function that gets called for a topic sub
+
+  /**
+   * Initialize Ticker / Timer
+   */
+  timer1_attachInterrupt(onTimerISR);
+  timer1_enable(TIM_DIV16, TIM_EDGE, TIM_SINGLE);
+  timer1_write(tmr1_write_val);        //From above, the goal is .001s 
   
 }
 
 
-void loop() {
+void loop() 
+{
   //If MQTT client can't connect to broker, then reconnect
   if (!client.connected()) {
     digitalWrite(LED_PIN, LOW);            
@@ -177,17 +262,48 @@ void loop() {
     reconnect();
     delay(500);
   }
+  else {
+    digitalWrite(LED_PIN, HIGH);
+  }
   
-  digitalWrite(LED_PIN, HIGH);    
-  client.loop();                  // the mqtt function that processes MQTT messages
+  client.loop();                  // the MQTT function that processes MQTT messages
+
+  if(Timer1msFlag == true) 
+  {
+    Timer1msFlag = false;
+  }
+  
+  if(Timer50msFlag == true) 
+  {
+    Timer50msFlag = false;
+  }
+
+  if(Timer500msFlag == true) 
+  {
+    Timer500msFlag = false;
+  }
+
+  if(Timer1000msFlag == true) 
+  {
+    Timer1000msFlag = false;
+    (seconds_counter == 65535)?(seconds_counter = 0):(seconds_counter++);
+
+  }
+  
+  if(seconds_counter >= SECONDS_BETWEEN_STATE_MESSAGES) 
+  {
+    seconds_counter = 0;    //Reset the seconds counter
+    client.publish(assigned_ctrl_state, state_payload);
+  }
   
 }
  
-void callback(char* topic, byte* payload, unsigned int length) {
+void callback(char* topic, byte* payload, unsigned int length)
+{
   payload[length] = '\0';
   strTopic = String((char*)topic);
   
-  if (strTopic == assigned_button_topic)
+  if (strTopic == assigned_ctrl_topic)
   {
     switch1 = String((char*)payload);
     Serial.print("Topic: "); Serial.println(strTopic);
@@ -196,7 +312,14 @@ void callback(char* topic, byte* payload, unsigned int length) {
     {
       // 'Push' the garage door open/close button
       Serial.println("RELAY ACTIVE");
-      analogWrite(RELAY_PIN,512);       // Duty cycle val 0-1023 (512~50%)  
+      
+      /** 
+       * The old version supported 0-1023, but 
+       * this is not longer the case
+       */
+      analogWrite(RELAY_PIN,128);       // Duty cycle val 0-255 (128 ~50%)  
+      
+      
       delay(PUSH_DWELL_US);
       analogWrite(RELAY_PIN, 0);
       Serial.println("RELAY INACTIVE");
@@ -240,3 +363,5 @@ void reconnect() {
     delay(5000);
   }
 }
+
+
